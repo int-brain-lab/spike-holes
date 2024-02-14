@@ -40,9 +40,9 @@ def get_one():
 # -------------------------------------------------------------------------------------------------
 
 def make_snippet(pid, t, win_size=WIN_SIZE):
-    one = get_one()
-    eid, pname = one.pid2eid(pid)
-    session_path = one.eid2path(eid)
+    # one = get_one()
+    # eid, pname = one.pid2eid(pid)
+    # session_path = one.eid2path(eid)
     t0 = t - win_size / 2.0
     t1 = t + win_size / 2.0
     return (pid, t0, t1)
@@ -81,25 +81,78 @@ def download_spike_data(snippet):
 
 
 # -------------------------------------------------------------------------------------------------
+# Spike sorting
+# -------------------------------------------------------------------------------------------------
+
+def run_pyks2(snippet):
+    # TODO
+    return spikes, clusters, channels
+
+
+# -------------------------------------------------------------------------------------------------
 # Plotting
 # -------------------------------------------------------------------------------------------------
 
-def make_plot(snippet, raw, fs=None, spikes=None, clusters=None):
+def select_raw(snippet, raw, fs=None, show_interval=None):
+    if not show_interval:
+        return raw
+
     assert fs
     pid, t0, t1 = snippet
-    fig, ax = plt.subplots(figsize=(12, 6))
+
+    t0s, t1s = show_interval
+    t0s -= t0
+    t1s -= t0
+
+    first, last = (int(t0s * fs), int(t1s * fs))
+    return raw[:, first:last]
+
+
+def select_times_channels(spikes, clusters, show_interval):
+    t0s, t1s = show_interval or (t0, t1)
+
+    s = spikes.times
+    c = clusters.channels[spikes.clusters]
+
+    idx = (s >= t0s) & (s < t1s)
+    si = 1000 * (s[idx] - t0s)
+    ci = c[idx]
+
+    return si, ci
+
+
+def make_plot(snippet, raw, fs=None, show_interval=None, spikes=None, clusters=None):
+    assert fs
+    pid, t0, t1 = snippet
+
+    # Snippet to plot.
+    t0s, t1s = show_interval or t0, t1
+
+    # Raw data snippet.
+    raws = select_raw(snippet, raw, fs=fs, show_interval=show_interval)
+    raws = destripe(raws, fs=fs)
+
+    # Find quantiles.
     q = .005
-    vmin, vmax = np.quantile(raw, q), np.quantile(raw, 1 - q)
-    d1 = Density(raw, fs=fs, taxis=1, ax=ax, vmin=vmin, vmax=vmax, cmap='Greys')
+    vmin, vmax = np.quantile(raws, q), np.quantile(raw, 1 - q)
+
+    # Figure.
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Density plot.
+    d1 = Density(raws, fs=fs, taxis=1, ax=ax, vmin=vmin, vmax=vmax, cmap='Greys')
+
+    # Overlay spikes.
     if spikes is not None and clusters is not None:
         s = spikes.times
         c = clusters.channels[spikes.clusters]
-        # Subselect spikes.
-        idx = (s >= t0) & (s < t1)
-        si = 1000 * (s[idx] - t0)
-        ci = c[idx]
-        ax.scatter(si, ci, s=20, c=[1, 0, 0], alpha=.5)
-    ax.set_title(f"{pid}: {t0}-{t1}")
+        si, ci = select_times_channels(spikes, clusters, show_interval)
+        ax.scatter(si, ci, s=20, color=[1, 0, 0], alpha=.5)
+
+    # Figure title.
+    ax.set_title(f"{pid}: {t0s}-{t1s}")
+
+    # Show the figure.
     plt.show()
 
 
@@ -113,20 +166,26 @@ if __name__ == '__main__':
     pid = '84bb830f-b9ff-4e6b-9296-f458fb41d160'
     # pid = '5a34d971-1cb3-4f0e-8dfe-e51e2313a668'
 
-    T = 1500 + WIN_SIZE / 2.0
+    # Time.
+    t0 = 1495
+    t1 = 1505
+    T = 1500
+    dt = .1
 
-    snippet = make_snippet(pid, T)
+    # Snippet.
+    snippet = (pid, t0, t1)
+    show_interval = (T, T + dt)
+
+    # snippet = make_snippet(pid, T, win_size=10)
     # path = get_plot_path(snippet)
 
     # Raw data.
     raw_ap, fs = download_raw_data(snippet)
-    destriped = destripe(raw_ap, fs=fs)
 
     # Spikes.
     spikes, clusters, channels = download_spike_data(snippet)
     s = spikes.times
     c = clusters.channels[spikes.clusters]
-    # print(s.shape)
-    # print(c.shape)
 
-    make_plot(snippet, destriped, fs=fs, spikes=spikes, clusters=clusters)
+    make_plot(
+        snippet, raw_ap, fs=fs, show_interval=show_interval, spikes=spikes, clusters=clusters)
