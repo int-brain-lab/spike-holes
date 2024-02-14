@@ -88,7 +88,8 @@ def make_plot(snippet, raw, fs=None, spikes=None, clusters=None):
     assert fs
     pid, t0, t1 = snippet
     fig, ax = plt.subplots(figsize=(12, 6))
-    vmin = vmax = None
+    q = .005
+    vmin, vmax = np.quantile(raw, q), np.quantile(raw, 1 - q)
     d1 = Density(raw, fs=fs, taxis=1, ax=ax, vmin=vmin, vmax=vmax, cmap='Greys')
     if spikes is not None and clusters is not None:
         s = spikes.times
@@ -97,7 +98,7 @@ def make_plot(snippet, raw, fs=None, spikes=None, clusters=None):
         idx = (s >= t0) & (s < t1)
         si = 1000 * (s[idx] - t0)
         ci = c[idx]
-        ax.scatter(si, ci, s=10, c=[1, 1, 0])
+        ax.scatter(si, ci, s=20, c=[1, 0, 0], alpha=.5)
     ax.set_title(f"{pid}: {t0}-{t1}")
     plt.show()
 
@@ -112,7 +113,7 @@ if __name__ == '__main__':
     pid = '84bb830f-b9ff-4e6b-9296-f458fb41d160'
     # pid = '5a34d971-1cb3-4f0e-8dfe-e51e2313a668'
 
-    T = 1500
+    T = 1500 + WIN_SIZE / 2.0
 
     snippet = make_snippet(pid, T)
     # path = get_plot_path(snippet)
