@@ -25,6 +25,7 @@ from pykilosort.ibl import run_spike_sorting_ibl, ibl_pykilosort_params, downloa
 # -------------------------------------------------------------------------------------------------
 
 WIN_SIZE = .1
+BATCH_SIZE = 2.18689567
 ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / 'data/'
 SCRATCH_DIR = ROOT_DIR / 'scratch'
@@ -67,7 +68,9 @@ def get_cbin_snippet_path(snippet, sr_ap):
     l = list(name.split('.'))
     l[3] = 'stream'
     name = '.'.join(l)
-    return dir / f'chunk_{t0-1:06d}_to_{t1-1:06d}' / name
+    a = max(t0 - 1, 0)
+    b = t1 - 1
+    return dir / f'chunk_{a:06d}_to_{b:06d}' / name
 
 
 # -------------------------------------------------------------------------------------------------
@@ -126,6 +129,20 @@ def run_pyks2(snippet, bin_file, force=False):
 
 
 # -------------------------------------------------------------------------------------------------
+# Hole detection
+# -------------------------------------------------------------------------------------------------
+
+def detect_holes(st, threshold=.006):
+    d = np.diff(st)
+    ev = d > threshold
+    idx = np.where(ev)
+    tev = st[idx]
+    a = np.diff(tev) / BATCH_SIZE
+    count, batch = np.histogram(a, bins=500)  # , range=[0, 10])
+    return tev, count, batch
+
+
+# -------------------------------------------------------------------------------------------------
 # Plotting
 # -------------------------------------------------------------------------------------------------
 
@@ -144,7 +161,7 @@ def select_raw(snippet, raw, fs=None, show_interval=None):
     return raw[:, first:last]
 
 
-def select_times_channels(spikes, clusters, show_interval):
+def subset_spikes(spikes, clusters, show_interval):
     t0s, t1s = show_interval or (t0, t1)
 
     s = spikes.times
@@ -164,7 +181,7 @@ def make_plot(
     pid, t0, t1 = snippet
 
     # Snippet to plot.
-    t0s, t1s = show_interval or t0, t1
+    t0s, t1s = show_interval or (t0, t1)
 
     # Raw data snippet.
     raws = select_raw(snippet, raw, fs=fs, show_interval=show_interval)
@@ -182,16 +199,22 @@ def make_plot(
 
     # Overlay spikes.
     if spikes is not None and clusters is not None:
-        si, ci = select_times_channels(spikes, clusters, show_interval)
+        si, ci = subset_spikes(spikes, clusters, show_interval)
         ax.scatter(si, ci, s=50, color=[1, 0, 0], alpha=.5)
     if spikes_rerun is not None and clusters_rerun is not None:
-        si, ci = select_times_channels(spikes_rerun, clusters_rerun, show_interval)
+        si, ci = subset_spikes(spikes_rerun, clusters_rerun, show_interval)
         ax.scatter(si, ci, s=50, color=[0, 1, 0], alpha=.5)
 
     # Figure title.
-    ax.set_title(f"{pid}: {t0s}-{t1s}")
+    ax.set_title(f"{pid}: {t0s:.3f}s - {t1s:.3f}s")
 
     # Show the figure.
+    plt.show()
+
+
+def plot_holes(count, batch):
+    plt.figure()
+    plt.plot(batch[:-1], count)
     plt.show()
 
 
@@ -206,9 +229,9 @@ if __name__ == '__main__':
     # pid = '5a34d971-1cb3-4f0e-8dfe-e51e2313a668'
 
     # Time.
-    t0 = 1495
-    t1 = 1505
-    T = 1500
+    t0 = 0
+    t1 = 30
+    T = 8.745 - .05
     dt = .1
 
     # Snippet.
@@ -224,13 +247,24 @@ if __name__ == '__main__':
     # Load existing spikes.
     spikes_orig, clusters_orig, channels_orig = download_spike_data(snippet)
 
-    # Also, run spike sorting again.
-    spikes_rerun, clusters_rerun, channels_rerun = run_pyks2(
-        snippet, get_cbin_snippet_path(snippet, sr_ap))
-    spikes_rerun.times += t0 - 1
+    # # Also, run spike sorting again.
+    rerun = True
+    if rerun:
+        spikes_rerun, clusters_rerun, channels_rerun = run_pyks2(
+            snippet, get_cbin_snippet_path(snippet, sr_ap))
+        # spikes_rerun.times += max(0, t0 - 1)
+    else:
+        spikes_rerun = clusters_rerun = None
 
     # Show the spikes on top of the raw data.
     make_plot(
         snippet, raw_ap, fs=fs, show_interval=show_interval,
         spikes=spikes_orig, clusters=clusters_orig,
         spikes_rerun=spikes_rerun, clusters_rerun=clusters_rerun)
+
+    # Holes.
+    st = spikes_orig.times
+    st = st[(st >= t0) & (st < t1)]
+    tev, count, batch = detect_holes(st)
+    print("holes:", tev)
+    # plot_holes(count, batch)
