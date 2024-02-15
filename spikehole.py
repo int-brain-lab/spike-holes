@@ -2,6 +2,8 @@
 # Imports
 # -------------------------------------------------------------------------------------------------
 
+import os
+import logging
 from pathlib import Path
 import shutil
 from urllib.parse import urlparse
@@ -18,6 +20,8 @@ from ibllib.plots import Density
 from neurodsp.voltage import destripe
 from brainbox.io.one import SpikeSortingLoader
 from pykilosort.ibl import run_spike_sorting_ibl, ibl_pykilosort_params, download_test_data
+
+logger = logging.getLogger("pykilosort")
 
 
 # -------------------------------------------------------------------------------------------------
@@ -73,6 +77,26 @@ def get_cbin_snippet_path(snippet, sr_ap):
     return dir / f'chunk_{a:06d}_to_{b:06d}' / name
 
 
+def clear_dir(directory):
+    """
+    Recursively clear the contents of a directory without deleting the directory itself.
+    """
+    # Iterate over the contents of the directory
+    logger.info(f"Deleting {directory}")
+    for root, dirs, files in os.walk(directory, topdown=False):
+        # Delete files
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+
+        # Delete subdirectories
+        for dir_name in dirs:
+            dir_path = os.path.join(root, dir_name)
+            os.rmdir(dir_path)
+
+    # After all contents are cleared, the directory should be empty
+
+
 # -------------------------------------------------------------------------------------------------
 # Downloading
 # -------------------------------------------------------------------------------------------------
@@ -106,6 +130,11 @@ def run_pyks2(snippet, bin_file, force=False):
     # Get the pyks2 parameters.
     params = ibl_pykilosort_params(bin_file)
     params['Th'] = [6, 3]
+    params['preprocessing_function'] = 'kilosort'
+    params['save_drift_spike_detections'] = True
+    params['perform_drift_registration'] = False
+    params['stable_mode'] = False
+    params['deterministic_mode'] = False
 
     # pyks2 output directory.
     ks_output_dir = get_snippet_path(snippet)
@@ -117,6 +146,9 @@ def run_pyks2(snippet, bin_file, force=False):
     # Run the spike sorting on the raw data snippet.
     if force or not (alf_path / 'spikes.samples.npy').exists():
         print("Running spike sorting...")
+        clear_dir(SCRATCH_DIR)
+        clear_dir(alf_path)
+        clear_dir(ks_output_dir)
         run_spike_sorting_ibl(
             bin_file, scratch_dir=SCRATCH_DIR, ks_output_dir=ks_output_dir, alf_path=alf_path,
             delete=False, log_level='INFO', params=params)
@@ -167,10 +199,13 @@ def subset_spikes(spikes, clusters, show_interval):
     s = spikes.times
     c = clusters.channels[spikes.clusters]
 
+    m = min(len(s), len(c))
+    s = s[:m]
+    c = c[:m]
+
     idx = (s >= t0s) & (s < t1s)
     si = 1000 * (s[idx] - t0s)
     ci = c[idx]
-
     return si, ci
 
 
@@ -230,7 +265,7 @@ if __name__ == '__main__':
 
     # Time.
     t0 = 0
-    t1 = 30
+    t1 = 15
     T = 8.745 - .05
     dt = .1
 
@@ -247,24 +282,37 @@ if __name__ == '__main__':
     # Load existing spikes.
     spikes_orig, clusters_orig, channels_orig = download_spike_data(snippet)
 
-    # # Also, run spike sorting again.
+    # Also, run spike sorting again.
     rerun = True
+    force = True
     if rerun:
+        path = get_cbin_snippet_path(snippet, sr_ap)
         spikes_rerun, clusters_rerun, channels_rerun = run_pyks2(
-            snippet, get_cbin_snippet_path(snippet, sr_ap))
+            snippet, path, force=force)
         # spikes_rerun.times += max(0, t0 - 1)
     else:
         spikes_rerun = clusters_rerun = None
 
     # Show the spikes on top of the raw data.
+    # st = np.load(
+    #     "scratch/.kilosort/_spikeglx_ephysData_g0_t0.imec0.ap.stream.cbin/temp_splits/st3_learn.npy")[:, 0] / 3e4
+    # print(spikes_rerun.times.shape, spikes_rerun.times[:10])
+    # print(st.shape, st[:10])
+    # spikes_rerun.times = st
+
+    # print(spikes_rerun.times)
+    # spikes_rerun.times = np.load(
+    #     "scratch/.kilosort/_spikeglx_ephysData_g0_t0.imec0.ap.stream.cbin/drift/spike_times.npy") / 3e4
+    # print(spikes_rerun.times)
+
     make_plot(
         snippet, raw_ap, fs=fs, show_interval=show_interval,
         spikes=spikes_orig, clusters=clusters_orig,
         spikes_rerun=spikes_rerun, clusters_rerun=clusters_rerun)
 
     # Holes.
-    st = spikes_orig.times
-    st = st[(st >= t0) & (st < t1)]
-    tev, count, batch = detect_holes(st)
-    print("holes:", tev)
+    # st = spikes_orig.times
+    # st = st[(st >= t0) & (st < t1)]
+    # tev, count, batch = detect_holes(st)
+    # print("holes:", tev)
     # plot_holes(count, batch)
